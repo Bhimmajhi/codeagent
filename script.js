@@ -79,11 +79,41 @@ async function send(txt,shown){
   sys(ab?"Interrupted.":(e instanceof TypeError?"Network or CORS error. This provider may block direct browser calls. Try OpenRouter, or set a proxy as Base URL in settings.":e.message),!ab);
  }finally{busy(0);ctl=null}
 }
-const HELP="/help  show this list\n/key [value]  set your API key (no value opens settings)\n/provider [id]  switch provider\n/model [name]  set model\n/system [text]  set system prompt\n/clear  clear the conversation\n/export  download chat as .md\n/settings  open settings\n/upload  open a ZIP project\n/check  check the project for problems\n/fix [what]  let the AI fix the project\n/zip [name]  download the project as a ZIP\n/files  list project files\n/undo  revert the last AI file changes\n/close  close the project\nesc  interrupt a reply";
+const ABOUT=`Code Agent — What I can do
+
+1. Build websites and apps: HTML, CSS, JavaScript, React, Astro, Next.js and other frameworks (depending on the project).
+2. Work with existing projects: upload a ZIP, inspect files, explain architecture, edit multiple files and add features while preserving the current design when requested.
+3. Debug and improve code: find likely issues, fix errors, refactor, improve responsiveness, accessibility and performance.
+4. Create code: components, pages, APIs, scripts, forms, layouts, documentation and configuration files.
+5. Explain and teach: understand code, compare technologies, give setup instructions and step-by-step guidance.
+6. Project tools: list files, run the built-in static checks, apply AI file changes, undo the last AI changes and download the updated project as ZIP.
+7. AI providers: NVIDIA NIM, OpenRouter, Groq, OpenAI-compatible APIs and other listed providers, depending on your keys and configuration.
+
+Limits: I cannot run npm install, terminal commands, build pipelines or live tests in this website workspace. The built-in check is a static check, not a full runtime test. I cannot guarantee every generated change is error-free. Keep API keys in a secure backend such as Cloudflare Worker secrets; do not publish private keys in GitHub or frontend code.
+
+Type /help to see commands. Upload a ZIP with + to work on an existing project.`;
+const HELP=`/help  show this list
+/about  show all capabilities and limitations
+/key [value]  set your API key (no value opens settings)
+/provider [id]  switch provider
+/model [name]  set model
+/system [text]  set system prompt
+/clear  clear the conversation
+/export  download chat as .md
+/settings  open settings
+/upload  open a ZIP project
+/check  check the project for problems
+/fix [what]  let the AI fix the project
+/zip [name]  download the project as a ZIP
+/files  list project files
+/undo  revert the last AI file changes
+/close  close the project
+esc  interrupt a reply`;
 function cmd(t){
  const a=t.split(/\s+/),c=a.shift(),r=a.join(" ");
  add("u",esc(c==="/key"&&r?"/key ••••••••":t));
  if(c==="/help")sys(HELP);
+ else if(c==="/about")sys(ABOUT);
  else if(c==="/key"){if(r){set({key:r});sys("Key saved for "+P[S.prov].n+".")}else openSet()}
  else if(c==="/settings")openSet();
  else if(c==="/provider"){if(P[r]){S.prov=r;save();stat();sys("Provider: "+P[r].n+"  model: "+C().model)}else sys("Providers: "+Object.keys(P).join(", "))}

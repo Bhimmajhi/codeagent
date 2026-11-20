@@ -50,3 +50,9 @@ Original ZIP kabhi overwrite nahi hota; fixed project nayi ZIP mein download hot
 
 
 - AI ke through ek individual text file create/edit karne ki limit: 50 MB. Bahut badi files ko chhote sections mein edit karna behtar hai.
+
+## Website mein AI capabilities dekhna
+
+Chat box mein `/about` type karke AI ki capabilities aur limitations dekhein. `/help` mein commands ki list bhi di gayi hai. Website ka existing design/layout, colors aur controls change nahi kiye gaye; sirf help content aur `/about` command add ki gayi hai.
+
+Capabilities mein website/app code banana, uploaded ZIP project ko samajhna aur edit karna, debugging, multi-file changes, code explanations, static project checks, undo aur ZIP download shamil hain. Terminal, npm install, full build aur live runtime testing is workspace mein supported nahi hain.
