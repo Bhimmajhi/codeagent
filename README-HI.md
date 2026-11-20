@@ -51,8 +51,15 @@ Original ZIP kabhi overwrite nahi hota; fixed project nayi ZIP mein download hot
 
 - AI ke through ek individual text file create/edit karne ki limit: 50 MB. Bahut badi files ko chhote sections mein edit karna behtar hai.
 
-## Website mein AI capabilities dekhna
+## v10 mein naye features
 
-Chat box mein `/about` type karke AI ki capabilities aur limitations dekhein. `/help` mein commands ki list bhi di gayi hai. Website ka existing design/layout, colors aur controls change nahi kiye gaye; sirf help content aur `/about` command add ki gayi hai.
+- **Chat history limit:** bheji jaane wali history ab last 30 messages aur lagbhag 180k characters tak seemit hai. Purane `file:` blocks chhote placeholder mein badal jaate hain, taaki "Send between 1 and 40 messages" aur "Request too large" errors na aayein.
+- **AGENTS.md / CLAUDE.md:** ZIP mein ye files hon to unhe "project instructions" ke roop mein sabse pehle bheja jaata hai.
+- **Edit blocks:** chhote badlav ke liye poori file ki jagah `edit:path` block mein SEARCH/REPLACE pairs. SEARCH text file mein exactly ek baar milna chahiye; warna file nahi badalti aur reason dikhta hai.
+- **Read command:** AI ```read block mein paths likh kar extra files maang sakta hai. Site unhe agle message mein bhejti hai (ek jawab mein maximum 3 round).
+- **/diff [file]:** ZIP upload ke baad ki changes dekhein (ek hi hunk, 400 lines tak). Page reload ke baad original save nahi hota, to ZIP dobara upload karna padega.
 
-Capabilities mein website/app code banana, uploaded ZIP project ko samajhna aur edit karna, debugging, multi-file changes, code explanations, static project checks, undo aur ZIP download shamil hain. Terminal, npm install, full build aur live runtime testing is workspace mein supported nahi hain.
+## Abhi bhi nahi hai
+
+- Terminal, `npm install`, build ya tests: ye Cloudflare Worker ke andar safe nahi hain. Iske liye alag isolated sandbox runner service chahiye (jaise `.devcontainer` ka firewall setup dekh sakte hain).
+- Undo abhi bhi sirf ek step tak hai.

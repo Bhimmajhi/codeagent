@@ -60,3 +60,5 @@ dialog input,dialog select,dialog textarea{width:100%;background:var(--cd);borde
 .ab{margin:4px 8px 0 0}
 .fp{color:var(--ac)}.fd{color:var(--er)}
 @media (prefers-reduced-motion:reduce){#plus{transition:none}}
+
+.dp{color:var(--ok)}.dm{color:var(--er)}

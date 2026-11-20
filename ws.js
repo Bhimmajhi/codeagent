@@ -13,7 +13,7 @@
   var PLACEHOLDER = /(rest of (the )?(code|file)|(remains?|stays?) (the )?same|(code|content|file) (is |remains )?unchanged|existing code|\.\.\.\s*\(?(rest|remaining|other|existing|previous))/i;
   var SECRET_RE = /(sk-[A-Za-z0-9_-]{20,}|nvapi-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|gh[pousr]_[A-Za-z0-9]{30,}|gsk_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})/;
 
-  var ws = { name: "", root: "", fromZip: false, files: new Map(), base: new Map(), hidden: new Set(), skipped: 0, prev: null };
+  var ws = { name: "", root: "", fromZip: false, files: new Map(), base: new Map(), orig: new Map(), hidden: new Set(), skipped: 0, prev: null };
 
   var text = function (b) { return new TextDecoder("utf-8").decode(b); };
   function fmt(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
@@ -59,6 +59,7 @@
       list = list.map(function (x) { return [x[0].slice(root.length + 1), x[1]]; });
     }
     ws.files = new Map(list);
+    ws.orig = new Map(list);
     ws.base = new Map();
     ws.files.forEach(function (b, p) { ws.base.set(p, g.Zip.crc32(b)); });
     ws.root = root;
@@ -70,7 +71,7 @@
     return ws;
   }
   function clear() {
-    ws.files = new Map(); ws.base = new Map(); ws.hidden = new Set(); ws.prev = null;
+    ws.files = new Map(); ws.base = new Map(); ws.hidden = new Set(); ws.prev = null; ws.orig = new Map();
     ws.name = ""; ws.root = ""; ws.fromZip = false; ws.skipped = 0;
   }
 
@@ -182,12 +183,22 @@
   // ---------- what the AI sees ----------
   var PROTOCOL = [
     "You work inside a browser-based project workspace. The user can upload a ZIP project and download the whole project as a ZIP at any time.",
-    "When you create or change project files, output every changed or new file COMPLETELY (never partial code, diffs, or \"rest unchanged\") as a fenced block whose info string is file:<relative path>. Example:",
+    "For a small change to an existing file, use an edit block: a fenced block with info string edit:<relative path>, holding one or more pairs in this exact form:",
+    "```edit:src/app.js",
+    "<<<<<<< SEARCH",
+    "exact existing lines, copied from the file in the context (same indentation)",
+    "=======",
+    "the replacement lines",
+    ">>>>>>> REPLACE",
+    "```",
+    "Each SEARCH text must occur exactly once in the current file, so include enough surrounding lines to make it unique. The website applies the pairs in order.",
+    "For a new file, or a change that rewrites most of a file, output the complete file in a fenced block with info string file:<relative path>. Never send partial code or \"rest unchanged\" inside a file: block. Example:",
     "```file:src/app.js",
     "...complete file content...",
     "```",
-    "Use a longer fence (four backticks) if the file itself contains triple backticks. To delete a file, use a block with info string delete:<path> and an empty body. Use forward slashes; no leading slash and no \"..\". Include only files you actually changed or created, and briefly explain the changes outside the blocks.",
-    "For questions and short snippets, use normal code blocks without file:. You cannot run code or reach the network, so never claim you tested something."
+    "Use a longer fence (four backticks) if the content contains triple backticks. To delete a file, use a block with info string delete:<path> and an empty body. Use forward slashes; no leading slash and no \"..\". Explain the changes briefly outside the blocks.",
+    "If you need a file that is not in the context, reply with a fenced block with info string read that lists one path per line, and nothing else. The website sends those files in its next message.",
+    "For questions and short snippets, use normal code blocks without file:, edit: or read:. You cannot run code or reach the network, so never claim you tested something."
   ].join("\n");
 
   function snapshot(budget, query) {
@@ -206,6 +217,7 @@
       if (SECRET_FILE.test(p) || isBin(p, b)) { ws.hidden.add(p); return; }
       var content = text(b), lower = p.toLowerCase(), score = 0;
       if (important.test(p)) score += 100;
+      if (/(^|\/)(agents|claude)\.md$/i.test(p)) score += 500;
       if (/^(src\/)?(index|main|app|server|routes|api)\.[^/]+$/i.test(p)) score += 35;
       if (/\.(js|jsx|ts|tsx|py|go|rs|java|php|rb|vue|svelte)$/i.test(p)) score += 8;
       terms.forEach(function (term) {
@@ -228,7 +240,8 @@
     }).join("\n");
     var hid = Array.from(ws.hidden);
     var hiddenList = hid.slice(0, 250).join(", ") + (hid.length > 250 ? ", ... and " + (hid.length - 250) + " more" : "");
-    return 'Project "' + ws.name + '" (' + ws.files.size + " files; " + fmt(size()) + ").\n" +
+    var instr = all.some(function (p) { return /(^|\/)(agents|claude)\.md$/i.test(p) && shown.has(p); });
+    return (instr ? "Project instructions in AGENTS.md / CLAUDE.md are binding for this project. Follow them.\n" : "") + 'Project "' + ws.name + '" (' + ws.files.size + " files; " + fmt(size()) + ").\n" +
       "Full file tree (all paths):\n" + tree + "\n\n" +
       "Task-focused source context (selected by filenames, project manifests and task keywords; " + shown.size + " files shown):\n" + body +
       (hid.length ? "\n\nFiles not included in this request (binary, secret, or outside context budget): " + hiddenList +
@@ -239,8 +252,8 @@
   function fileInfo(info) {
     info = String(info || "").trim();
     var unq = function (s) { return s.replace(/^["'`]+|["'`,;]+$/g, ""); };
-    var m = info.match(/^(?:[\w+#.-]+\s+)?(file|delete)\s*[:=]\s*(\S+)/i);
-    if (m) { var p = unq(m[2]); return p ? { op: m[1].toLowerCase() === "delete" ? "delete" : "put", path: p } : null; }
+    var m = info.match(/^(?:[\w+#.-]+\s+)?(file|delete|edit)\s*[:=]\s*(\S+)/i);
+    if (m) { var p = unq(m[2]); return p ? { op: m[1].toLowerCase() === "delete" ? "delete" : m[1].toLowerCase() === "edit" ? "edit" : "put", path: p } : null; }
     m = info.match(/^[\w+#-]+:([^\s:]*\.[A-Za-z0-9]+)$/);          // e.g. ```js:src/app.js
     return m ? { op: "put", path: unq(m[1]) } : null;
   }
@@ -276,6 +289,7 @@
         if (ws.files.delete(p)) r.deleted.push(p); else r.skipped.push(p + " (not in the project)");
         return;
       }
+      if (e.op === "edit") { var nx = editFile(p, e.content, r); if (nx === null) return; e = { op: "put", path: e.path, content: nx }; }
       var b = enc.encode(e.content), had = ws.files.get(p);
       if (b.length > MAX_PUT) { r.skipped.push(p + " (file too large)"); return; }
       if (!had && ws.files.size >= MAX_FILES) { r.skipped.push(p + " (too many files)"); return; }
@@ -328,15 +342,90 @@
       });
       db.close();
       if (!d || !d.files || !d.files.length) return false;
-      ws.files = new Map(d.files); ws.base = new Map(d.base || []);
+      ws.files = new Map(d.files); ws.base = new Map(d.base || []); ws.orig = new Map();
       ws.name = d.name; ws.root = d.root || ""; ws.fromZip = !!d.fromZip; ws.skipped = d.skipped || 0; ws.hidden = new Set();
       return true;
     } catch (e) { return false; }
   }
 
+  // ---------- edit blocks, read requests, diff (v10) ----------
+  var EDIT_RE = /<{7} SEARCH\n([\s\S]*?)\n={7}\n([\s\S]*?)>{7} REPLACE/g;
+  // Applies SEARCH/REPLACE pairs to one file. Returns the new text, or null (and says why) if any pair fails.
+  function editFile(p, body, r) {
+    if (!ws.files.has(p)) { r.skipped.push(p + " (edit: file is not in the project)"); return null; }
+    var s = text(ws.files.get(p)), pairs = [], m, i, n;
+    EDIT_RE.lastIndex = 0;
+    while ((m = EDIT_RE.exec(String(body)))) pairs.push([m[1], m[2].replace(/\n$/, "")]);
+    if (!pairs.length) { r.skipped.push(p + " (edit block has no SEARCH/REPLACE pair)"); return null; }
+    for (i = 0; i < pairs.length; i++) {
+      // Whole lines: match SEARCH with its newline (so an empty REPLACE removes the line). If the file has no
+      // newline after that text (last line), fall back to the bare text.
+      var S = pairs[i][0], R = pairs[i][1], sx = S + "\n", rx = R === "" ? "" : R + "\n";
+      n = S ? s.split(sx).length - 1 : 0;
+      if (n === 0) { sx = S; rx = R; n = S ? s.split(sx).length - 1 : 0; }
+      if (n !== 1) { r.skipped.push(p + " (edit " + (i + 1) + ": search text " + (n ? "matches " + n + " places" : "not found") + "; this edit block left unchanged)"); return null; }
+      s = s.replace(sx, function () { return rx; });
+    }
+    return s;
+  }
+
+  // Files the AI asked for with a ```read block. Only files that exist, are text and are not secrets.
+  function readReqs(reply) {
+    var out = [], re = /^\s{0,3}(`{3,}|~{3,})\s*read\s*$\n([\s\S]*?)^\s{0,3}\1\s*$/gm, m;
+    while ((m = re.exec(String(reply || "")))) {
+      m[2].split("\n").forEach(function (l) {
+        var p = clean(l.trim());
+        if (p && out.length < 12 && ws.files.has(p) && !SECRET_FILE.test(p) && !isBin(p, ws.files.get(p)) && out.indexOf(p) < 0) out.push(p);
+      });
+    }
+    return out;
+  }
+  function readText(paths) {
+    var s = "", left = 60000;
+    paths.forEach(function (p) {
+      if (left <= 0) return;
+      var t = text(ws.files.get(p)), x = t.length <= left ? t : t.slice(0, left) + "\n... (truncated)";
+      left -= x.length;
+      s += '<file path="' + p + '">\n' + x + (x.slice(-1) === "\n" ? "" : "\n") + "</file>\n";
+    });
+    return "Requested files (you asked to read them):\n" + s + "Continue the task with these files.";
+  }
+
+  function sp(s) { return s === "" ? [] : s.replace(/\n$/, "").split("\n"); }
+  // One-hunk line diff between the ZIP's original and the current file. Lines are prefixed + / - / space.
+  function diffText(p) {
+    var A = null, B = null;
+    if (ws.orig.has(p)) A = text(ws.orig.get(p));
+    else if (ws.base.has(p)) return { msg: "original not kept after a reload; upload the ZIP again to see this diff" };
+    if (ws.files.has(p)) B = text(ws.files.get(p));
+    var a = sp(A === null ? "" : A), b = sp(B === null ? "" : B);
+    var i = 0, ea = a.length, eb = b.length, ops = [], x = 0, y = 0, n, m, L, add = 0, del = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    while (ea > i && eb > i && a[ea - 1] === b[eb - 1]) { ea--; eb--; }
+    n = ea - i; m = eb - i;
+    if (n * m <= 4000000) {
+      L = [];
+      for (x = 0; x <= n; x++) L.push(new Uint32Array(m + 1));
+      for (x = n - 1; x >= 0; x--) for (y = m - 1; y >= 0; y--)
+        L[x][y] = a[i + x] === b[i + y] ? L[x + 1][y + 1] + 1 : Math.max(L[x + 1][y], L[x][y + 1]);
+      x = 0; y = 0;
+      while (x < n && y < m) {
+        if (a[i + x] === b[i + y]) { ops.push(" " + a[i + x]); x++; y++; }
+        else if (L[x + 1][y] >= L[x][y + 1]) ops.push("-" + a[i + x++]);
+        else ops.push("+" + b[i + y++]);
+      }
+    }
+    for (; x < n; x++) ops.push("-" + a[i + x]);
+    for (; y < m; y++) ops.push("+" + b[i + y]);
+    ops.forEach(function (o) { if (o[0] === "+") add++; else if (o[0] === "-") del++; });
+    var lines = a.slice(Math.max(0, i - 3), i).map(function (l) { return " " + l; }).concat(ops, a.slice(ea, ea + 3).map(function (l) { return " " + l; }));
+    if (lines.length > 400) lines = lines.slice(0, 400).concat(["... " + (lines.length - 400) + " more lines"]);
+    return { add: add, del: del, lines: lines };
+  }
+
   g.W = {
     ws: ws, load: load, clear: clear, diff: diff, nChanged: nChanged, entries: entries, outName: outName,
-    check: check, report: report, snapshot: snapshot, PROTOCOL: PROTOCOL,
+    check: check, report: report, snapshot: snapshot, PROTOCOL: PROTOCOL, readReqs: readReqs, readText: readText, diffText: diffText,
     fileInfo: fileInfo, parse: parse, apply: apply, undo: undo, persist: persist, restore: restore, fmt: fmt, size: size, clean: clean
   };
   if (typeof module !== "undefined" && module.exports) module.exports = g.W;

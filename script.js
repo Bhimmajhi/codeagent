@@ -51,7 +51,7 @@ async function rd(r,an,f){const R=r.body.getReader(),D=new TextDecoder();let b="
    if(j.type==="error")throw new Error((j.error&&j.error.message)||"stream error");
    const t=an?(j.type==="content_block_delta"&&j.delta&&j.delta.text):(j.choices&&j.choices[0]&&j.choices[0].delta&&j.choices[0].delta.content);
    if(t)f(t)}}}
-async function send(txt,shown){
+async function send(txt,shown,depth){let nxt=[];
  const c=C(),p=P[S.prov],an=!!p.a;
  if(!S.proxyUrl&&!c.key){sys("No API key for "+p.n+". Run /key or tap the status line. If using Cloudflare Worker, enter its URL in Settings.",1);return}
  if(!S.proxyUrl&&(!c.url||!c.model)){sys("Base URL and model are required. Open settings.",1);return}
@@ -61,59 +61,55 @@ async function send(txt,shown){
  ctl=new AbortController();busy(1);
  try{
   if(S.proxyUrl){
-   const r=await fetch(S.proxyUrl.replace(/\/+$/ ,"")+"/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:hist.slice(),system:sy,model:c.model}),signal:ctl.signal});
+   const r=await fetch(S.proxyUrl.replace(/\/+$/ ,"")+"/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:ctxHist(),system:sy,model:c.model}),signal:ctl.signal});
    if(!r.ok){let e=await r.text();try{const j=JSON.parse(e);e=j.error||j.message||e}catch(x){}throw new Error(r.status+" "+e)}
    await rd(r,false,t=>{acc+=t;if(!raf)raf=requestAnimationFrame(draw)});draw();hist.push({role:"assistant",content:acc||"(empty)"});
   }else{
-   const u=c.url.replace(/\/+$/ ,"")+(an?"/v1/messages":"/chat/completions"),h={"Content-Type":"application/json"},m=hist.slice();let b;
+   const u=c.url.replace(/\/+$/ ,"")+(an?"/v1/messages":"/chat/completions"),h={"Content-Type":"application/json"},m=ctxHist();let b;
    if(an){h["x-api-key"]=c.key;h["anthropic-version"]="2023-06-01";h["anthropic-dangerous-direct-browser-access"]="true";b={model:c.model,max_tokens:8192,stream:true,messages:m,system:sy}}
    else{h.Authorization="Bearer "+c.key;b={model:c.model,stream:true,max_tokens:8192,messages:[{role:"system",content:sy}].concat(m)}}
    const r=await fetch(u,{method:"POST",headers:h,body:JSON.stringify(b),signal:ctl.signal});
    if(!r.ok){let e=await r.text();try{const j=JSON.parse(e);e=(j.error&&(j.error.message||j.error))||j.message||e}catch(x){}throw new Error(r.status+" "+(typeof e==="string"?e:JSON.stringify(e)))}
    await rd(r,an,t=>{acc+=t;if(!raf)raf=requestAnimationFrame(draw)});draw();hist.push({role:"assistant",content:acc||"(empty)"});
   }
-  applyReply(acc);
+  applyReply(acc);nxt=W.readReqs(acc);
  }catch(e){
   const ab=e.name==="AbortError";
   if(acc){draw();hist.push({role:"assistant",content:acc})}else{out.remove();hist.pop()}
   sys(ab?"Interrupted.":(e instanceof TypeError?"Network or CORS error. This provider may block direct browser calls. Try OpenRouter, or set a proxy as Base URL in settings.":e.message),!ab);
  }finally{busy(0);ctl=null}
+ if(nxt.length&&(depth||0)<3)return send(W.readText(nxt),"read "+nxt.join(", "),(depth||0)+1);
 }
-const ABOUT=`Code Agent — What I can do
-
-1. Build websites and apps: HTML, CSS, JavaScript, React, Astro, Next.js and other frameworks (depending on the project).
-2. Work with existing projects: upload a ZIP, inspect files, explain architecture, edit multiple files and add features while preserving the current design when requested.
-3. Debug and improve code: find likely issues, fix errors, refactor, improve responsiveness, accessibility and performance.
-4. Create code: components, pages, APIs, scripts, forms, layouts, documentation and configuration files.
-5. Explain and teach: understand code, compare technologies, give setup instructions and step-by-step guidance.
-6. Project tools: list files, run the built-in static checks, apply AI file changes, undo the last AI changes and download the updated project as ZIP.
-7. AI providers: NVIDIA NIM, OpenRouter, Groq, OpenAI-compatible APIs and other listed providers, depending on your keys and configuration.
-
-Limits: I cannot run npm install, terminal commands, build pipelines or live tests in this website workspace. The built-in check is a static check, not a full runtime test. I cannot guarantee every generated change is error-free. Keep API keys in a secure backend such as Cloudflare Worker secrets; do not publish private keys in GitHub or frontend code.
-
-Type /help to see commands. Upload a ZIP with + to work on an existing project.`;
-const HELP=`/help  show this list
-/about  show all capabilities and limitations
-/key [value]  set your API key (no value opens settings)
-/provider [id]  switch provider
-/model [name]  set model
-/system [text]  set system prompt
-/clear  clear the conversation
-/export  download chat as .md
-/settings  open settings
-/upload  open a ZIP project
-/check  check the project for problems
-/fix [what]  let the AI fix the project
-/zip [name]  download the project as a ZIP
-/files  list project files
-/undo  revert the last AI file changes
-/close  close the project
-esc  interrupt a reply`;
+const HELP="/help  show this list\n/key [value]  set your API key (no value opens settings)\n/provider [id]  switch provider\n/model [name]  set model\n/system [text]  set system prompt\n/clear  clear the conversation\n/export  download chat as .md\n/settings  open settings\n/upload  open a ZIP project\n/check  check the project for problems\n/fix [what]  let the AI fix the project\n/zip [name]  download the project as a ZIP\n/files  list project files\n/undo  revert the last AI file changes\n/diff [file]  show what changed in the project\n/close  close the project\nesc  interrupt a reply";
+/* history sent to the AI: the newest messages within a budget; old file blocks are shortened */
+const HIST_MAX=30,HIST_CHARS=180000;
+function ctxHist(){
+ const o=[];let n=0;
+ for(let i=hist.length-1;i>=0&&o.length<HIST_MAX;i--){
+  let m=hist[i];
+  if(m.role==="assistant")m={role:"assistant",content:m.content.replace(/(`{3,})(?:file|delete|edit):[^\n]*\n[\s\S]*?\n\1/g,"[file change from an earlier reply]")};
+  if(o.length&&n+m.content.length>HIST_CHARS)break;
+  n+=m.content.length;o.unshift(m);
+ }
+ while(o.length&&o[0].role!=="user")o.shift();
+ return o;
+}
+/* /diff [file]: changes made to the project since the ZIP was uploaded */
+function showDiff(arg){
+ if(!W.ws.files.size){sys("No project loaded.",1);return}
+ const d=W.diff(),all=[...d.added,...d.modified,...d.deleted].sort(),list=arg?all.filter(p=>p.indexOf(arg)>=0):all;
+ if(!list.length){sys(arg?"No changed file matches "+arg+".":"No changes yet. Ask the AI to edit a file, then run /diff again.");return}
+ sys(list.length+" changed file"+(list.length>1?"s":"")+(list.length>8?". Showing the first 8; use /diff <file> for one.":""));
+ list.slice(0,8).forEach(p=>{
+  const r=W.diffText(p);
+  if(r.msg){sys(p+": "+r.msg);return}
+  add("",'<div class="cb"><div class="ch"><span class="fp">'+esc(p)+'</span><span>+'+r.add+' −'+r.del+'</span></div><pre>'+r.lines.map(l=>l[0]==="+"?'<span class="dp">'+esc(l)+'</span>':l[0]==="-"?'<span class="dm">'+esc(l)+'</span>':esc(l)).join("\n")+'</pre></div>');
+ });
+}
 function cmd(t){
  const a=t.split(/\s+/),c=a.shift(),r=a.join(" ");
  add("u",esc(c==="/key"&&r?"/key ••••••••":t));
  if(c==="/help")sys(HELP);
- else if(c==="/about")sys(ABOUT);
  else if(c==="/key"){if(r){set({key:r});sys("Key saved for "+P[S.prov].n+".")}else openSet()}
  else if(c==="/settings")openSet();
  else if(c==="/provider"){if(P[r]){S.prov=r;save();stat();sys("Provider: "+P[r].n+"  model: "+C().model)}else sys("Providers: "+Object.keys(P).join(", "))}
@@ -129,6 +125,7 @@ function cmd(t){
  else if(c==="/fix")fix(r,false);
  else if(c==="/files")ls();
  else if(c==="/undo")undo();
+ else if(c==="/diff")showDiff(r)
  else if(c==="/close")closeProj();
  else sys("Unknown command. Try /help.",1)}
 function go(){const t=ta.value.trim();if(ctl||!t)return;ta.value="";fit();t[0]==="/"?cmd(t):send(t)}
@@ -177,7 +174,7 @@ function fix(extra,echo){
  if(ctl){sys("Wait for the current reply to finish.",1);return}
  if(!W.ws.files.size){sys("No project yet. Tap + and upload a ZIP.",1);return}
  const rep=W.report(W.check());
- send("Review this project and fix every problem you find"+(extra?", starting with: "+extra:"")+".\n\nAutomatic check results:\n"+rep+"\n\nReturn each changed file in full as a file: block, then explain the changes briefly. If nothing needs fixing, say so.",
+ send("Review this project and fix every problem you find"+(extra?", starting with: "+extra:"")+".\n\nAutomatic check results:\n"+rep+"\n\nFix each problem with edit blocks (or a full file: block for a rewrite), then explain the changes briefly. If nothing needs fixing, say so.",
   echo===false?false:"/fix"+(extra?" "+extra:"")+"  ("+W.ws.files.size+" files + check results sent)")
 }
 async function dl(name){
